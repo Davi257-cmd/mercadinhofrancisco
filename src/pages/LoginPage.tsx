@@ -21,6 +21,7 @@ import {
   Inventory as InventoryIcon,
 } from '@mui/icons-material'
 import { useAuth } from '../hooks/useAuth'
+import { SecurityWarning } from '../components/common/SecurityWarning'
 
 export function LoginPage() {
   const navigate = useNavigate()
@@ -52,6 +53,7 @@ export function LoginPage() {
       sx={{
         minHeight: '100vh',
         display: 'flex',
+        flexDirection: 'column',
         alignItems: 'center',
         justifyContent: 'center',
         p: 2,
@@ -62,6 +64,8 @@ export function LoginPage() {
         `,
       }}
     >
+      <SecurityWarning />
+      
       <Card
         sx={{
           width: '100%',
