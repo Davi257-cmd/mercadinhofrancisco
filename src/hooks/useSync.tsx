@@ -208,8 +208,8 @@ export function SyncProvider({ children }: { children: ReactNode }) {
       // Sync immediately when coming online
       syncNow()
 
-      // Set up periodic sync
-      syncIntervalRef.current = setInterval(syncNow, 30000) // Every 30 seconds
+      // Set up periodic sync every 1 hour
+      syncIntervalRef.current = setInterval(syncNow, 3600000) // Every 1 hour
     } else {
       if (syncIntervalRef.current) {
         clearInterval(syncIntervalRef.current)

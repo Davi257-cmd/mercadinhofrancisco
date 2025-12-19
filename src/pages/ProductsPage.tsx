@@ -16,6 +16,8 @@ import {
   Chip,
   alpha,
   Skeleton,
+  ToggleButton,
+  ToggleButtonGroup,
 } from '@mui/material'
 import {
   Add as AddIcon,
@@ -24,12 +26,16 @@ import {
   Delete as DeleteIcon,
   Inventory as ProductIcon,
   QrCode2 as BarcodeIcon,
+  CameraAlt as CameraIcon,
+  Keyboard as KeyboardIcon,
 } from '@mui/icons-material'
 import { v4 as uuidv4 } from 'uuid'
 import { db } from '../db/dexie'
 import { supabase } from '../services/supabase'
 import { useAuth } from '../hooks/useAuth'
 import { ConfirmDialog } from '../components/common/ConfirmDialog'
+import { CameraScanner } from '../components/barcode/CameraScanner'
+import { KeyboardWedge } from '../components/barcode/KeyboardWedge'
 import type { Product } from '../types'
 
 export function ProductsPage() {
@@ -44,6 +50,8 @@ export function ProductsPage() {
     open: false,
     productId: null,
   })
+  const [scanMode, setScanMode] = useState<'keyboard' | 'camera' | null>(null)
+  const [showCamera, setShowCamera] = useState(false)
 
   // Form state
   const [name, setName] = useState('')
@@ -92,6 +100,13 @@ export function ProductsPage() {
     setUnit('un')
     setPrice('')
     setEditingProduct(null)
+    setScanMode(null)
+  }
+
+  const handleBarcodeScanned = (scannedBarcode: string) => {
+    setBarcode(scannedBarcode)
+    setScanMode(null)
+    setShowCamera(false)
   }
 
   const handleOpenDialog = (product?: Product) => {
@@ -338,12 +353,47 @@ export function ProductsPage() {
             onChange={(e) => setName(e.target.value)}
             sx={{ mt: 2, mb: 2 }}
           />
+          
+          {/* Scanner mode selector */}
+          <Box sx={{ mb: 2 }}>
+            <Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: 'block' }}>
+              Escanear Código de Barras
+            </Typography>
+            <ToggleButtonGroup
+              value={scanMode}
+              exclusive
+              onChange={(_, value) => {
+                setScanMode(value)
+                if (value === 'camera') {
+                  setShowCamera(true)
+                }
+              }}
+              fullWidth
+              size="small"
+            >
+              <ToggleButton value="keyboard">
+                <KeyboardIcon sx={{ mr: 1 }} /> USB/Bluetooth
+              </ToggleButton>
+              <ToggleButton value="camera">
+                <CameraIcon sx={{ mr: 1 }} /> Câmera
+              </ToggleButton>
+            </ToggleButtonGroup>
+          </Box>
+
+          {/* Keyboard scanner */}
+          {scanMode === 'keyboard' && (
+            <Box sx={{ mb: 2 }}>
+              <KeyboardWedge onScan={handleBarcodeScanned} enabled={true} showIndicator={true} />
+            </Box>
+          )}
+
           <TextField
             fullWidth
             label="Código de Barras"
             value={barcode}
             onChange={(e) => setBarcode(e.target.value)}
             sx={{ mb: 2 }}
+            placeholder="Digite ou escaneie o código"
             InputProps={{
               startAdornment: (
                 <InputAdornment position="start">
@@ -398,6 +448,17 @@ export function ProductsPage() {
         onConfirm={() => deleteConfirm.productId && handleDeleteProduct(deleteConfirm.productId)}
         onCancel={() => setDeleteConfirm({ open: false, productId: null })}
       />
+
+      {/* Camera Scanner */}
+      {showCamera && (
+        <CameraScanner
+          onScan={handleBarcodeScanned}
+          onClose={() => {
+            setShowCamera(false)
+            setScanMode(null)
+          }}
+        />
+      )}
     </Box>
   )
 }
