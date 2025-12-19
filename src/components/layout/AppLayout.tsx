@@ -10,6 +10,7 @@ import {
   BottomNavigationAction,
   Chip,
   alpha,
+  CircularProgress,
 } from '@mui/material'
 import {
   Home as HomeIcon,
@@ -22,6 +23,7 @@ import {
 } from '@mui/icons-material'
 import { useAuth } from '../../hooks/useAuth'
 import { useSync } from '../../hooks/useSync'
+import { InstallPWA } from '../common/InstallPWA'
 
 interface AppLayoutProps {
   children: ReactNode
@@ -102,20 +104,19 @@ export function AppLayout({ children }: AppLayoutProps) {
             )}
 
             {/* Sync button */}
-            <IconButton 
-              onClick={syncNow}
-              disabled={!isOnline || isSyncing}
-              sx={{
-                color: isOnline ? 'primary.main' : 'grey.500',
-                animation: isSyncing ? 'spin 1s linear infinite' : 'none',
-                '@keyframes spin': {
-                  from: { transform: 'rotate(0deg)' },
-                  to: { transform: 'rotate(360deg)' },
-                },
-              }}
-            >
-              {isOnline ? <SyncIcon /> : <SyncDisabledIcon />}
-            </IconButton>
+            {isSyncing ? (
+              <CircularProgress size={24} sx={{ mx: 1 }} />
+            ) : (
+              <IconButton 
+                onClick={syncNow}
+                disabled={!isOnline}
+                sx={{
+                  color: isOnline ? 'primary.main' : 'grey.500',
+                }}
+              >
+                {isOnline ? <SyncIcon /> : <SyncDisabledIcon />}
+              </IconButton>
+            )}
 
             {/* User info */}
             <Typography 
@@ -176,6 +177,9 @@ export function AppLayout({ children }: AppLayoutProps) {
           ))}
         </BottomNavigation>
       )}
+
+      {/* Install PWA Button */}
+      <InstallPWA />
     </Box>
   )
 }

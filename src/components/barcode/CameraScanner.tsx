@@ -1,18 +1,7 @@
-import { useState, useEffect, useRef } from 'react'
-import { 
-  Box, 
-  IconButton, 
-  Typography, 
-  CircularProgress,
-  alpha 
-} from '@mui/material'
-import { 
-  FlashOn, 
-  FlashOff, 
-  Close as CloseIcon,
-  CameraAlt 
-} from '@mui/icons-material'
-import { BrowserMultiFormatReader, NotFoundException } from '@zxing/library'
+import { useEffect, useRef, useState } from 'react'
+import { Box, IconButton, Typography, CircularProgress, alpha } from '@mui/material'
+import { Close as CloseIcon, CameraAlt } from '@mui/icons-material'
+import { Html5QrcodeScanner } from 'html5-qrcode'
 
 interface CameraScannerProps {
   onScan: (barcode: string) => void
@@ -21,97 +10,72 @@ interface CameraScannerProps {
 }
 
 export function CameraScanner({ onScan, onClose, enabled = true }: CameraScannerProps) {
-  const videoRef = useRef<HTMLVideoElement>(null)
-  const readerRef = useRef<BrowserMultiFormatReader | null>(null)
+  const scannerRef = useRef<Html5QrcodeScanner | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [flashEnabled, setFlashEnabled] = useState(false)
-  const [hasFlash, setHasFlash] = useState(false)
-  const streamRef = useRef<MediaStream | null>(null)
 
   useEffect(() => {
     if (!enabled) return
 
-    const reader = new BrowserMultiFormatReader()
-    readerRef.current = reader
+    const scannerId = 'qr-reader'
+    
+    try {
+      // Configuração do scanner
+      const scanner = new Html5QrcodeScanner(
+        scannerId,
+        {
+          fps: 10, // Frames por segundo
+          qrbox: { width: 250, height: 250 }, // Área de escaneamento
+          aspectRatio: 1.0,
+          showTorchButtonIfSupported: true, // Mostra botão de flash se disponível
+          formatsToSupport: [
+            0,  // QR_CODE
+            1,  // EAN_13
+            2,  // EAN_8
+            3,  // CODE_39
+            4,  // CODE_93
+            5,  // CODE_128
+            6,  // UPC_A
+            7,  // UPC_E
+            8,  // ITF
+          ],
+        },
+        false // verbose
+      )
 
-    const startScanning = async () => {
-      try {
-        setIsLoading(true)
-        setError(null)
+      scannerRef.current = scanner
 
-        const devices = await navigator.mediaDevices.enumerateDevices()
-        const videoDevices = devices.filter(d => d.kind === 'videoinput')
-        
-        // Prefer back camera on mobile
-        const backCamera = videoDevices.find(d => 
-          d.label.toLowerCase().includes('back') || 
-          d.label.toLowerCase().includes('traseira')
-        )
-        
-        const deviceId = backCamera?.deviceId || videoDevices[0]?.deviceId
-
-        if (!deviceId) {
-          throw new Error('Nenhuma câmera encontrada')
-        }
-
-        await reader.decodeFromVideoDevice(
-          deviceId,
-          videoRef.current!,
-          (result, err) => {
-            if (result) {
-              const barcode = result.getText()
-              onScan(barcode)
-              playBeep()
-              vibrate()
-            }
-            if (err && !(err instanceof NotFoundException)) {
-              console.error('Scan error:', err)
-            }
-          }
-        )
-
-        // Check for flash support
-        if (videoRef.current?.srcObject) {
-          streamRef.current = videoRef.current.srcObject as MediaStream
-          const track = streamRef.current.getVideoTracks()[0]
-          const capabilities = track?.getCapabilities?.() as MediaTrackCapabilities & { torch?: boolean }
-          setHasFlash(!!capabilities?.torch)
-        }
-
-        setIsLoading(false)
-      } catch (err) {
-        console.error('Camera error:', err)
-        setError(err instanceof Error ? err.message : 'Erro ao acessar câmera')
-        setIsLoading(false)
+      // Callback de sucesso
+      const onScanSuccess = (decodedText: string) => {
+        playBeep()
+        vibrate()
+        onScan(decodedText)
+        scanner.clear()
+        onClose()
       }
+
+      // Callback de erro (ignorar)
+      const onScanFailure = () => {
+        // Não fazer nada - é normal falhar enquanto procura código
+      }
+
+      // Renderizar o scanner
+      scanner.render(onScanSuccess, onScanFailure)
+      
+      setIsLoading(false)
+    } catch (err) {
+      console.error('Erro ao iniciar scanner:', err)
+      setError('Erro ao acessar a câmera. Verifique as permissões.')
+      setIsLoading(false)
     }
 
-    startScanning()
-
+    // Cleanup
     return () => {
-      reader.reset()
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach(track => track.stop())
+      if (scannerRef.current) {
+        scannerRef.current.clear().catch(console.error)
       }
     }
-  }, [enabled, onScan])
-
-  const toggleFlash = async () => {
-    if (!streamRef.current) return
-
-    const track = streamRef.current.getVideoTracks()[0]
-    if (track) {
-      try {
-        await track.applyConstraints({
-          advanced: [{ torch: !flashEnabled } as MediaTrackConstraintSet]
-        })
-        setFlashEnabled(!flashEnabled)
-      } catch (err) {
-        console.error('Flash toggle error:', err)
-      }
-    }
-  }
+  }, [enabled, onScan, onClose])
 
   return (
     <Box
@@ -134,153 +98,100 @@ export function CameraScanner({ onScan, onClose, enabled = true }: CameraScanner
           alignItems: 'center',
           justifyContent: 'space-between',
           p: 2,
-          bgcolor: alpha('#000', 0.5),
-          position: 'absolute',
-          top: 0,
-          left: 0,
-          right: 0,
-          zIndex: 1,
+          bgcolor: alpha('#000', 0.8),
+          position: 'relative',
+          zIndex: 10000,
         }}
       >
         <Typography variant="h6" color="white">
           Escanear Código
         </Typography>
-        <Box sx={{ display: 'flex', gap: 1 }}>
-          {hasFlash && (
-            <IconButton onClick={toggleFlash} sx={{ color: 'white' }}>
-              {flashEnabled ? <FlashOff /> : <FlashOn />}
-            </IconButton>
-          )}
-          <IconButton onClick={onClose} sx={{ color: 'white' }}>
-            <CloseIcon />
-          </IconButton>
-        </Box>
+        <IconButton onClick={onClose} sx={{ color: 'white' }}>
+          <CloseIcon />
+        </IconButton>
       </Box>
 
-      {/* Video */}
+      {/* Loading */}
+      {isLoading && (
+        <Box
+          sx={{
+            flex: 1,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            flexDirection: 'column',
+            gap: 2,
+          }}
+        >
+          <CircularProgress sx={{ color: 'primary.main' }} />
+          <Typography color="white">Iniciando câmera...</Typography>
+        </Box>
+      )}
+
+      {/* Error */}
+      {error && (
+        <Box
+          sx={{
+            flex: 1,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            flexDirection: 'column',
+            p: 3,
+            textAlign: 'center',
+          }}
+        >
+          <CameraAlt sx={{ fontSize: 64, color: 'error.main', mb: 2 }} />
+          <Typography color="error" variant="h6" gutterBottom>
+            {error}
+          </Typography>
+          <Typography color="grey.500" variant="body2">
+            Certifique-se de permitir o acesso à câmera
+          </Typography>
+        </Box>
+      )}
+
+      {/* Scanner Container */}
       <Box
+        id="qr-reader"
         sx={{
           flex: 1,
-          display: 'flex',
+          display: isLoading || error ? 'none' : 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          position: 'relative',
-        }}
-      >
-        {isLoading && (
-          <Box sx={{ position: 'absolute', zIndex: 2 }}>
-            <CircularProgress sx={{ color: 'primary.main' }} />
-          </Box>
-        )}
-
-        {error && (
-          <Box
-            sx={{
-              position: 'absolute',
-              zIndex: 2,
-              textAlign: 'center',
-              p: 3,
-            }}
-          >
-            <CameraAlt sx={{ fontSize: 64, color: 'error.main', mb: 2 }} />
-            <Typography color="error" variant="h6">
-              {error}
-            </Typography>
-            <Typography color="grey.500" variant="body2" sx={{ mt: 1 }}>
-              Verifique as permissões da câmera
-            </Typography>
-          </Box>
-        )}
-
-        <video
-          ref={videoRef}
-          style={{
+          '& video': {
             width: '100%',
             height: '100%',
             objectFit: 'cover',
-          }}
-          playsInline
-          muted
-        />
-
-        {/* Scanning overlay */}
-        {!isLoading && !error && (
-          <Box
-            sx={{
-              position: 'absolute',
-              top: '50%',
-              left: '50%',
-              transform: 'translate(-50%, -50%)',
-              width: '80%',
-              maxWidth: 300,
-              height: 200,
-              border: '3px solid',
-              borderColor: 'primary.main',
-              borderRadius: 2,
-              boxShadow: (theme) => `0 0 0 9999px ${alpha(theme.palette.common.black, 0.5)}`,
-              '&::before, &::after': {
-                content: '""',
-                position: 'absolute',
-                width: 20,
-                height: 20,
-                border: '3px solid',
-                borderColor: 'primary.main',
-              },
-              '&::before': {
-                top: -3,
-                left: -3,
-                borderRight: 'none',
-                borderBottom: 'none',
-                borderTopLeftRadius: 8,
-              },
-              '&::after': {
-                top: -3,
-                right: -3,
-                borderLeft: 'none',
-                borderBottom: 'none',
-                borderTopRightRadius: 8,
-              },
-            }}
-          >
-            {/* Scanning line animation */}
-            <Box
-              sx={{
-                position: 'absolute',
-                left: 10,
-                right: 10,
-                height: 2,
-                bgcolor: 'primary.main',
-                boxShadow: (theme) => `0 0 10px ${theme.palette.primary.main}`,
-                animation: 'scan 2s ease-in-out infinite',
-                '@keyframes scan': {
-                  '0%, 100%': { top: 10 },
-                  '50%': { top: 'calc(100% - 12px)' },
-                },
-              }}
-            />
-          </Box>
-        )}
-      </Box>
+          },
+          '& #qr-shaded-region': {
+            border: '3px solid #00d9ff !important',
+            borderRadius: '12px !important',
+          },
+        }}
+      />
 
       {/* Footer hint */}
-      <Box
-        sx={{
-          p: 2,
-          bgcolor: alpha('#000', 0.5),
-          textAlign: 'center',
-        }}
-      >
-        <Typography variant="body2" color="grey.400">
-          Posicione o código de barras dentro da área
-        </Typography>
-      </Box>
+      {!isLoading && !error && (
+        <Box
+          sx={{
+            p: 2,
+            bgcolor: alpha('#000', 0.8),
+            textAlign: 'center',
+          }}
+        >
+          <Typography variant="body2" color="grey.400">
+            Posicione o código dentro da área destacada
+          </Typography>
+        </Box>
+      )}
     </Box>
   )
 }
 
 function playBeep() {
   try {
-    const audioContext = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)()
+    const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)()
     const oscillator = audioContext.createOscillator()
     const gainNode = audioContext.createGain()
 
@@ -305,4 +216,3 @@ function vibrate() {
 }
 
 export default CameraScanner
-
