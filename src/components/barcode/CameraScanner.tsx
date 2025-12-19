@@ -19,31 +19,31 @@ export function CameraScanner({ onScan, onClose, enabled = true }: CameraScanner
   useEffect(() => {
     if (!enabled || !scannerRef.current) return
 
-    const config = {
+    const config: any = {
       inputStream: {
-        type: 'LiveStream',
+        type: 'LiveStream' as const,
         target: scannerRef.current,
         constraints: {
           width: { min: 640 },
           height: { min: 480 },
-          facingMode: 'environment', // Câmera traseira
+          facingMode: 'environment',
           aspectRatio: { min: 1, max: 2 },
         },
       },
       locator: {
-        patchSize: 'medium',
+        patchSize: 'medium' as const,
         halfSample: true,
       },
       numOfWorkers: navigator.hardwareConcurrency || 2,
       decoder: {
         readers: [
-          'ean_reader',      // EAN-13, EAN-8
+          'ean_reader',
           'ean_8_reader',
-          'code_128_reader', // CODE-128
-          'code_39_reader',  // CODE-39
+          'code_128_reader',
+          'code_39_reader',
           'code_39_vin_reader',
           'codabar_reader',
-          'upc_reader',      // UPC-A, UPC-E
+          'upc_reader',
           'upc_e_reader',
           'i2of5_reader',
           '2of5_reader',
