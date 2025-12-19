@@ -26,7 +26,7 @@ import {
 import { db, getAllSessions, getSessionEvents } from '../db/dexie'
 import { supabase } from '../services/supabase'
 import { useAuth } from '../hooks/useAuth'
-import type { LocalSession, LocalEvent, Product, SessionReport } from '../types'
+import type { LocalSession, Product, SessionReport } from '../types'
 
 interface ReportItem {
   productId: string
