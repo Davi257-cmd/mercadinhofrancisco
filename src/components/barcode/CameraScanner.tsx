@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
-import { Box, IconButton, Typography, CircularProgress, alpha } from '@mui/material'
-import { Close as CloseIcon, CameraAlt } from '@mui/icons-material'
-import { Html5QrcodeScanner } from 'html5-qrcode'
+import { Box, IconButton, Typography, alpha } from '@mui/material'
+import { Close as CloseIcon, CameraAlt, FlashOn, FlashOff } from '@mui/icons-material'
+import Quagga from '@ericblade/quagga2'
 
 interface CameraScannerProps {
   onScan: (barcode: string) => void
@@ -10,72 +10,132 @@ interface CameraScannerProps {
 }
 
 export function CameraScanner({ onScan, onClose, enabled = true }: CameraScannerProps) {
-  const scannerRef = useRef<Html5QrcodeScanner | null>(null)
-  const [isLoading, setIsLoading] = useState(true)
+  const scannerRef = useRef<HTMLDivElement>(null)
   const [error, setError] = useState<string | null>(null)
+  const [hasFlash, setHasFlash] = useState(false)
+  const [flashOn, setFlashOn] = useState(false)
+  const streamRef = useRef<MediaStream | null>(null)
 
   useEffect(() => {
-    if (!enabled) return
+    if (!enabled || !scannerRef.current) return
 
-    const scannerId = 'qr-reader'
-    
-    try {
-      // Configuração do scanner
-      const scanner = new Html5QrcodeScanner(
-        scannerId,
-        {
-          fps: 10, // Frames por segundo
-          qrbox: { width: 250, height: 250 }, // Área de escaneamento
-          aspectRatio: 1.0,
-          showTorchButtonIfSupported: true, // Mostra botão de flash se disponível
-          formatsToSupport: [
-            0,  // QR_CODE
-            1,  // EAN_13
-            2,  // EAN_8
-            3,  // CODE_39
-            4,  // CODE_93
-            5,  // CODE_128
-            6,  // UPC_A
-            7,  // UPC_E
-            8,  // ITF
-          ],
+    const config = {
+      inputStream: {
+        type: 'LiveStream',
+        target: scannerRef.current,
+        constraints: {
+          width: { min: 640 },
+          height: { min: 480 },
+          facingMode: 'environment', // Câmera traseira
+          aspectRatio: { min: 1, max: 2 },
         },
-        false // verbose
-      )
-
-      scannerRef.current = scanner
-
-      // Callback de sucesso
-      const onScanSuccess = (decodedText: string) => {
-        playBeep()
-        vibrate()
-        onScan(decodedText)
-        scanner.clear()
-        onClose()
-      }
-
-      // Callback de erro (ignorar)
-      const onScanFailure = () => {
-        // Não fazer nada - é normal falhar enquanto procura código
-      }
-
-      // Renderizar o scanner
-      scanner.render(onScanSuccess, onScanFailure)
-      
-      setIsLoading(false)
-    } catch (err) {
-      console.error('Erro ao iniciar scanner:', err)
-      setError('Erro ao acessar a câmera. Verifique as permissões.')
-      setIsLoading(false)
+      },
+      locator: {
+        patchSize: 'medium',
+        halfSample: true,
+      },
+      numOfWorkers: navigator.hardwareConcurrency || 2,
+      decoder: {
+        readers: [
+          'ean_reader',      // EAN-13, EAN-8
+          'ean_8_reader',
+          'code_128_reader', // CODE-128
+          'code_39_reader',  // CODE-39
+          'code_39_vin_reader',
+          'codabar_reader',
+          'upc_reader',      // UPC-A, UPC-E
+          'upc_e_reader',
+          'i2of5_reader',
+          '2of5_reader',
+          'code_93_reader',
+        ],
+        debug: {
+          showCanvas: false,
+          showPatches: false,
+          showFoundPatches: false,
+          showSkeleton: false,
+          showLabels: false,
+          showPatchLabels: false,
+          showRemainingPatchLabels: false,
+          boxFromPatches: {
+            showTransformed: false,
+            showTransformedBox: false,
+            showBB: false,
+          },
+        },
+      },
+      locate: true,
+      frequency: 10,
     }
 
-    // Cleanup
+    Quagga.init(config, (err) => {
+      if (err) {
+        console.error('Erro ao iniciar Quagga:', err)
+        setError('Erro ao acessar a câmera. Verifique as permissões.')
+        return
+      }
+
+      // Verifica suporte a flash
+      const stream = Quagga.CameraAccess.getActiveStreamLabel()
+      if (stream) {
+        const videoTrack = Quagga.CameraAccess.getActiveTrack()
+        if (videoTrack) {
+          streamRef.current = new MediaStream([videoTrack])
+          const capabilities = videoTrack.getCapabilities() as any
+          setHasFlash(!!capabilities?.torch)
+        }
+      }
+
+      Quagga.start()
+    })
+
+    // Handler de detecção
+    const handleDetected = (result: any) => {
+      if (!result || !result.codeResult) return
+
+      const code = result.codeResult.code
+      const errors = result.codeResult.decodedCodes
+        .filter((x: any) => x.error !== undefined)
+        .map((x: any) => x.error)
+
+      const avgError = errors.reduce((a: number, b: number) => a + b, 0) / errors.length
+
+      // Só aceita leituras com boa qualidade
+      if (avgError < 0.1) {
+        playBeep()
+        vibrate()
+        onScan(code)
+        Quagga.stop()
+        onClose()
+      }
+    }
+
+    Quagga.onDetected(handleDetected)
+
     return () => {
-      if (scannerRef.current) {
-        scannerRef.current.clear().catch(console.error)
+      Quagga.offDetected(handleDetected)
+      Quagga.stop()
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop())
       }
     }
   }, [enabled, onScan, onClose])
+
+  const toggleFlash = async () => {
+    if (!streamRef.current) return
+
+    const track = streamRef.current.getVideoTracks()[0]
+    if (!track) return
+
+    try {
+      await track.applyConstraints({
+        advanced: [{ torch: !flashOn } as any],
+      })
+      setFlashOn(!flashOn)
+    } catch (err) {
+      console.error('Erro ao alternar flash:', err)
+    }
+  }
 
   return (
     <Box
@@ -99,46 +159,39 @@ export function CameraScanner({ onScan, onClose, enabled = true }: CameraScanner
           justifyContent: 'space-between',
           p: 2,
           bgcolor: alpha('#000', 0.8),
-          position: 'relative',
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
           zIndex: 10000,
         }}
       >
         <Typography variant="h6" color="white">
-          Escanear Código
+          Escanear Código de Barras
         </Typography>
-        <IconButton onClick={onClose} sx={{ color: 'white' }}>
-          <CloseIcon />
-        </IconButton>
-      </Box>
-
-      {/* Loading */}
-      {isLoading && (
-        <Box
-          sx={{
-            flex: 1,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            flexDirection: 'column',
-            gap: 2,
-          }}
-        >
-          <CircularProgress sx={{ color: 'primary.main' }} />
-          <Typography color="white">Iniciando câmera...</Typography>
+        <Box sx={{ display: 'flex', gap: 1 }}>
+          {hasFlash && (
+            <IconButton onClick={toggleFlash} sx={{ color: 'white' }}>
+              {flashOn ? <FlashOff /> : <FlashOn />}
+            </IconButton>
+          )}
+          <IconButton onClick={onClose} sx={{ color: 'white' }}>
+            <CloseIcon />
+          </IconButton>
         </Box>
-      )}
+      </Box>
 
       {/* Error */}
       {error && (
         <Box
           sx={{
-            flex: 1,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            flexDirection: 'column',
-            p: 3,
+            position: 'absolute',
+            top: '50%',
+            left: '50%',
+            transform: 'translate(-50%, -50%)',
+            zIndex: 10001,
             textAlign: 'center',
+            p: 3,
           }}
         >
           <CameraAlt sx={{ fontSize: 64, color: 'error.main', mb: 2 }} />
@@ -151,37 +204,103 @@ export function CameraScanner({ onScan, onClose, enabled = true }: CameraScanner
         </Box>
       )}
 
-      {/* Scanner Container */}
+      {/* Scanner */}
       <Box
-        id="qr-reader"
+        ref={scannerRef}
         sx={{
           flex: 1,
-          display: isLoading || error ? 'none' : 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
+          position: 'relative',
           '& video': {
             width: '100%',
             height: '100%',
             objectFit: 'cover',
           },
-          '& #qr-shaded-region': {
-            border: '3px solid #00d9ff !important',
-            borderRadius: '12px !important',
+          '& canvas': {
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            width: '100%',
+            height: '100%',
           },
         }}
       />
 
-      {/* Footer hint */}
-      {!isLoading && !error && (
+      {/* Overlay de área de scan */}
+      {!error && (
+        <Box
+          sx={{
+            position: 'absolute',
+            top: '50%',
+            left: '50%',
+            transform: 'translate(-50%, -50%)',
+            width: '80%',
+            maxWidth: 400,
+            height: 200,
+            border: '3px solid',
+            borderColor: 'primary.main',
+            borderRadius: 2,
+            boxShadow: (theme) => `0 0 0 9999px ${alpha(theme.palette.common.black, 0.5)}`,
+            '&::before, &::after': {
+              content: '""',
+              position: 'absolute',
+              width: 30,
+              height: 30,
+              border: '4px solid',
+              borderColor: 'primary.main',
+            },
+            '&::before': {
+              top: -4,
+              left: -4,
+              borderRight: 'none',
+              borderBottom: 'none',
+              borderTopLeftRadius: 8,
+            },
+            '&::after': {
+              top: -4,
+              right: -4,
+              borderLeft: 'none',
+              borderBottom: 'none',
+              borderTopRightRadius: 8,
+            },
+          }}
+        >
+          {/* Linha de scan animada */}
+          <Box
+            sx={{
+              position: 'absolute',
+              left: 0,
+              right: 0,
+              height: 2,
+              bgcolor: 'primary.main',
+              boxShadow: (theme) => `0 0 10px ${theme.palette.primary.main}`,
+              animation: 'scan 2s ease-in-out infinite',
+              '@keyframes scan': {
+                '0%, 100%': { top: '10%' },
+                '50%': { top: '90%' },
+              },
+            }}
+          />
+        </Box>
+      )}
+
+      {/* Footer */}
+      {!error && (
         <Box
           sx={{
             p: 2,
             bgcolor: alpha('#000', 0.8),
             textAlign: 'center',
+            position: 'absolute',
+            bottom: 0,
+            left: 0,
+            right: 0,
           }}
         >
           <Typography variant="body2" color="grey.400">
-            Posicione o código dentro da área destacada
+            Posicione o código de barras dentro da área destacada
+          </Typography>
+          <Typography variant="caption" color="grey.600">
+            A leitura é automática
           </Typography>
         </Box>
       )}
