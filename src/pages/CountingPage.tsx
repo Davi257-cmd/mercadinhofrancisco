@@ -72,6 +72,8 @@ export function CountingPage() {
     if (!sessionId) return
 
     async function loadData() {
+      if (!sessionId) return // TypeScript guard
+      
       const sessionData = await getSessionById(sessionId)
       if (!sessionData || sessionData.status === 'closed') {
         navigate('/sessions')
